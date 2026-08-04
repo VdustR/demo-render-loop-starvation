@@ -1,6 +1,6 @@
 # A render loop nobody's guard catches
 
-**Live demos: <https://vdustr.dev/demo-render-loop-starvation/>**
+**Live demos: <https://vdustr.github.io/demo-render-loop-starvation/>**
 
 One line in a small floating widget starts a self-sustaining re-render loop, paced by
 `requestAnimationFrame`. Every renderer tested runs it happily — no error, no jank, and, measured,
