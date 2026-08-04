@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Suspense retry starvation</title>
+  </head>
+  <body style="margin: 0">
+    <!-- Painted with plain DOM so the instrument cannot become a second source
+         of React updates. See src/lib/statsPanel.ts. -->
+    <div
+      id="stats"
+      style="
+        max-width: 900px;
+        margin: 24px auto 0;
+        padding: 16px;
+        border: 2px solid #d9d9d9;
+        border-radius: 8px;
+        background: #fafafa;
+      "
+    ></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

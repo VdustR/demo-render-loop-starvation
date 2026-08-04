@@ -1,0 +1,15 @@
+{
+  "name": "demo-render-loop-starvation",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "A requestAnimationFrame-paced render loop that no framework guard catches: wasted work on every renderer, and a permanent deadlock on concurrent React.",
+  "scripts": {
+    "dev:react19": "pnpm --filter demo-react19 dev",
+    "dev:react18": "pnpm --filter demo-react18 dev",
+    "dev:vue3": "pnpm --filter demo-vue3 dev",
+    "dev:svelte5": "pnpm --filter demo-svelte5 dev",
+    "build": "pnpm -r build",
+    "build:site": "pnpm -r build:site"
+  }
+}

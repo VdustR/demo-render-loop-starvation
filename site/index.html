@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A render loop nobody's guard catches</title>
+    <meta
+      name="description"
+      content="A one-line ref mistake in a floating widget permanently deadlocks an unrelated screen — no error, no jank, no warning, and an idle network tab. Live demos on four renderers."
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #1a1a1a;
+        --muted: #667085;
+        --line: #e4e7ec;
+        --card: #fafafa;
+        --bad: #d4380d;
+        --bad-bg: #fff1f0;
+        --good: #389e0d;
+        --good-bg: #f6ffed;
+        --accent: #1677ff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #16181d;
+          --fg: #e8eaed;
+          --muted: #9aa0aa;
+          --line: #2c3038;
+          --card: #1d2027;
+          --bad: #ff7875;
+          --bad-bg: #2a1615;
+          --good: #95de64;
+          --good-bg: #16210f;
+          --accent: #69b1ff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 24px 96px;
+      }
+      h1 {
+        font-size: 30px;
+        line-height: 1.25;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 21px;
+        margin: 48px 0 12px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+      }
+      h3 {
+        font-size: 15px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 28px 0 10px;
+      }
+      p,
+      li {
+        color: var(--fg);
+      }
+      .lede {
+        font-size: 18px;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      code {
+        font: 0.88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      pre {
+        overflow-x: auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      pre code {
+        background: none;
+        border: 0;
+        padding: 0;
+      }
+      .callout {
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--accent);
+        background: var(--card);
+        border-radius: 8px;
+        padding: 14px 18px;
+        margin: 24px 0;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 12px;
+        margin: 12px 0 8px;
+      }
+      a.card {
+        display: block;
+        text-decoration: none;
+        color: inherit;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        background: var(--card);
+        transition: transform 0.08s ease;
+      }
+      a.card:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+      }
+      a.card.bad {
+        border-color: var(--bad);
+        background: var(--bad-bg);
+      }
+      a.card.good {
+        border-color: var(--good);
+        background: var(--good-bg);
+      }
+      .card .what {
+        font-weight: 650;
+        display: block;
+      }
+      .card .verdict {
+        font: 600 12px/1.6 ui-monospace, monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .card.bad .verdict {
+        color: var(--bad);
+      }
+      .card.good .verdict {
+        color: var(--good);
+      }
+      .card .note {
+        font-size: 13px;
+        color: var(--muted);
+        display: block;
+        margin-top: 4px;
+      }
+      .scroll {
+        overflow-x: auto;
+        margin: 16px 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        white-space: nowrap;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      td.bad {
+        color: var(--bad);
+        font-weight: 650;
+      }
+      td.good {
+        color: var(--good);
+      }
+      ol li {
+        margin-bottom: 8px;
+      }
+      footer {
+        margin-top: 64px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 14px;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>A render loop nobody&rsquo;s guard catches</h1>
+      <p class="lede">
+        One line in a small floating widget starts a self-sustaining re-render loop, paced by
+        <code>requestAnimationFrame</code>. Every renderer below runs it happily — no error, no
+        jank, and no warning from any framework.
+      </p>
+      <p>
+        What it <em>costs</em> depends on the renderer underneath. On Vue 3, Svelte 5, and React in
+        legacy sync mode it is pure waste: ~60 renders a second, forever, and nothing breaks. On
+        React with <code>createRoot</code> the same loop <strong>deadlocks an unrelated screen
+        permanently</strong> — spinner forever, idle network tab, no error, reload the only escape.
+        So this is not a React bug with a React fix; it is an ordinary feedback loop whose blast
+        radius is enormous on a preemptive scheduler, and React is the one shipping preemptive
+        scheduling today.
+      </p>
+      <p>
+        De-identified from a production single-page app, where it arrived as user reports of "the
+        page just keeps loading" on deep links. Every demo below is live; the counters at the top of
+        each page are the measurement.
+      </p>
+
+      <div class="callout">
+        <strong>Keep the demo tab in the foreground.</strong> The loop is paced by
+        <code>requestAnimationFrame</code>, and a hidden tab gets no animation frames — so a
+        background tab cannot reproduce the bug at all. This cost us three false readings while
+        investigating.
+      </div>
+
+      <h2>Try it</h2>
+      <h3>React 19 · concurrent</h3>
+      <div class="cards">
+        <a class="card bad" href="apps/react19/index.html?storm=on&amp;stormKind=ref&amp;fix=off">
+          <span class="what">The bug</span>
+          <span class="verdict">deadlocks</span>
+          <span class="note">Ref re-attach answered with a render. Watch the panel never arrive.</span>
+        </a>
+        <a class="card bad" href="apps/react19/index.html?storm=on&amp;stormKind=raf&amp;fix=off">
+          <span class="what">Same, without any refs</span>
+          <span class="verdict">deadlocks</span>
+          <span class="note">A plain <code>setState</code> per frame. The loop's source is irrelevant.</span>
+        </a>
+        <a class="card good" href="apps/react19/index.html?storm=on&amp;stormKind=ref&amp;fix=on">
+          <span class="what">The bug, fixed</span>
+          <span class="verdict">healthy</span>
+          <span class="note">One coalescing guard inside the existing rAF callback.</span>
+        </a>
+        <a class="card good" href="apps/react19/index.html?storm=off">
+          <span class="what">No loop at all</span>
+          <span class="verdict">healthy</span>
+          <span class="note">The control.</span>
+        </a>
+      </div>
+
+      <h3>React 18 · the decisive comparison</h3>
+      <div class="cards">
+        <a class="card bad" href="apps/react18/index.html?storm=on&amp;fix=off&amp;legacy=off">
+          <span class="what"><code>createRoot</code> — concurrent</span>
+          <span class="verdict">deadlocks</span>
+          <span class="note">Same code, same loop, priority-based scheduling.</span>
+        </a>
+        <a class="card good" href="apps/react18/index.html?storm=on&amp;fix=off&amp;legacy=on">
+          <span class="what"><code>ReactDOM.render</code> — legacy sync</span>
+          <span class="verdict">wasteful but fine</span>
+          <span class="note">The loop still burns a render every frame; the screen paints anyway.</span>
+        </a>
+      </div>
+
+      <h3>Other renderers · same 60Hz update stream</h3>
+      <div class="cards">
+        <a class="card good" href="apps/vue3/index.html?storm=on">
+          <span class="what">Vue 3 — async <code>setup</code> + <code>&lt;Suspense&gt;</code></span>
+          <span class="verdict">wasteful but fine</span>
+          <span class="note">Nothing goes wrong. Nothing warns either.</span>
+        </a>
+        <a class="card good" href="apps/svelte5/index.html?storm=on">
+          <span class="what">Svelte 5 — <code>{#await}</code></span>
+          <span class="verdict">wasteful but fine</span>
+          <span class="note">Same: no failure, no warning.</span>
+        </a>
+      </div>
+
+      <div class="callout">
+        <strong>What to watch on every page:</strong> <code>panel commits</code> and
+        <code>request started in effect</code>. In the deadlocked cases the panel is attempted
+        hundreds of times and committed zero times, and the follow-up request is
+        <em>never issued at all</em> — the network tab is idle, not blocked.
+      </div>
+
+      <h2>The mechanism</h2>
+      <ol>
+        <li>
+          A positioning controller re-renders its consumer whenever its <code>ref</code> callback is
+          called with a different value, scheduling that render through
+          <code>requestAnimationFrame</code>.
+        </li>
+        <li>
+          Component libraries compose refs and build a fresh ref callback on every render. React
+          then does what the spec says: call the old callback with <code>null</code>, the new one
+          with the node. The ref is re-attached on <em>every commit</em>, though the node never
+          changed.
+        </li>
+        <li>
+          Both legs of that re-attach miss the "did it change?" guard, so every commit schedules
+          another render, which produces another commit. <code>requestAnimationFrame</code> never
+          breaks the loop — it only paces it at one render per frame, which is exactly why it looks
+          harmless.
+        </li>
+        <li>
+          Meanwhile a <code>Suspense</code> boundary suspends <em>before its first commit</em> (a
+          deep link straight into a data-gated screen). When its promise resolves, React schedules a
+          <em>retry</em> render: the lowest priority it has, and one it deliberately never expires.
+        </li>
+        <li>
+          Every retry render is interrupted by the next frame's update and restarted from the root.
+          If the subtree takes longer to render than the gap between updates, it never finishes.
+        </li>
+        <li>
+          The subtree never commits, so <strong>its effects never run</strong> — and libraries that
+          subscribe on mount (React Query subscribes its observer in a commit effect) therefore
+          never issue a request. Spinner forever, idle network, no error, reload is the only escape.
+        </li>
+      </ol>
+      <p>
+        The missing request is a <em>consequence</em>, not the cause. That inversion is most of why
+        this takes so long to find.
+      </p>
+
+      <h2>Measured</h2>
+      <p class="lede" style="font-size: 15px">
+        One machine, Chrome, foreground tab, 8000-node subtree. "Storm" is the permanent ~60Hz
+        update stream.
+      </p>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Renderer</th>
+              <th>Storm</th>
+              <th>Stream source</th>
+              <th>Subtree commits</th>
+              <th>Follow-up request</th>
+              <th>Warnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>React 19 <code>createRoot</code></td>
+              <td>60/s</td>
+              <td>ref re-attach</td>
+              <td class="bad">0 of 504</td>
+              <td class="bad">never issued</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>React 19 <code>createRoot</code></td>
+              <td>60/s</td>
+              <td>plain setState</td>
+              <td class="bad">0 of 471</td>
+              <td class="bad">never issued</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>React 19, loop fixed</td>
+              <td>0/s</td>
+              <td>—</td>
+              <td class="good">1 of 3</td>
+              <td class="good">589 ms</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>React 18 <code>createRoot</code></td>
+              <td>60/s</td>
+              <td>ref re-attach</td>
+              <td class="bad">0 of 462</td>
+              <td class="bad">never issued</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>React 18 <code>ReactDOM.render</code></td>
+              <td>60/s</td>
+              <td>ref re-attach</td>
+              <td class="good">1 of 2</td>
+              <td class="good">550 ms</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>Vue 3</td>
+              <td>60/s</td>
+              <td>reactive write</td>
+              <td class="good">1 of 1</td>
+              <td class="good">810 ms</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>Svelte 5</td>
+              <td>60/s</td>
+              <td><code>$state</code> write</td>
+              <td class="good">1 of 1</td>
+              <td class="good">570 ms</td>
+              <td>0 / 0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:14px;color:var(--muted);border-left:3px solid var(--line);padding-left:14px">
+        Those numbers come from <em>development</em> builds at 8000 cheap leaves. This site ships
+        production builds, which render far faster per component, so its default subtree is 4000
+        leaves &times; 4000 iterations of work each. Every row was re-verified on the exact build
+        deployed here.
+      </p>
+      <p>
+        <strong>The loop is not React's</strong> — it is a universal feedback-loop bug, and Vue and
+        Svelte run it just as happily. <strong>The deadlock is concurrent React's</strong>: same
+        version, same code, <code>createRoot</code> hangs and <code>ReactDOM.render</code> does not.
+        <strong>And the ref bug is not required</strong> — any unstoppable ~60Hz default-priority
+        update does it.
+      </p>
+      <p>
+        Read the Vue and Svelte rows carefully: <em>nothing went wrong there</em>. That is not those
+        renderers handling the bug better — they did not notice it either. They simply have no
+        lowest-priority retry lane for the stream to starve, so the same defect can only express
+        itself as burnt CPU. Which is why a bug like this survives in production: without a Suspense
+        boundary to trip over, it is invisible.
+      </p>
+
+      <h2>Nobody's circuit breaker fires</h2>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Renderer</th>
+              <th>Guard it ships</th>
+              <th>Fired here?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>React</td>
+              <td><code>Too many re-renders</code></td>
+              <td class="bad">no — covers synchronous render-phase loops only</td>
+            </tr>
+            <tr>
+              <td>Vue 3</td>
+              <td><code>Maximum recursive updates exceeded</code></td>
+              <td class="bad">no</td>
+            </tr>
+            <tr>
+              <td>Svelte 5</td>
+              <td><code>effect_update_depth_exceeded</code></td>
+              <td class="bad">no</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        They all detect recursion <em>inside one tick</em>. A loop paced by
+        <code>requestAnimationFrame</code> is not recursion: each turn is one legitimate update, one
+        frame apart, and every guard stays happy. That gap is common to all of them — not a React
+        omission.
+      </p>
+
+      <h2>The fix</h2>
+      <pre><code>  function scheduleNotify() {
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() =&gt; {
++     // A ref re-attach detaches and re-attaches within one frame, so by the
++     // time this callback runs the target is back to what we last notified
++     // about. Only a real change gets through.
++     if (elState.target === notifiedTarget) return;
++     notifiedTarget = elState.target;
+      notify?.();
+    });
+  }</code></pre>
+      <p>
+        <code>requestAnimationFrame</code> was already there, but only as a pacer. This turns it
+        into a real debounce: coalesce whatever happened during the frame, then compare against what
+        was last announced. Real element changes still notify; a detach/attach pair does not.
+      </p>
+      <p>
+        In the original app that took commits from 115 per 2 s down to 5 per 2 s, and the stall went
+        from roughly one load in two to <strong>ten clean loads out of ten</strong> with the
+        Suspense code untouched.
+      </p>
+
+      <h2>Who is to blame</h2>
+      <ul>
+        <li><strong>React</strong> — behaving to spec. A ref callback with a new identity is a new ref.</li>
+        <li>
+          <strong>The component library</strong> — a fresh composed ref per render is wasteful but
+          legal, and long-standing. It cannot know a consumer will re-render in response.
+        </li>
+        <li>
+          <strong>The controller</strong> — the actual bug, two mistakes stacked: treating "my ref
+          was called with a different value" as "the element changed", and answering a ref call with
+          a <em>render</em>, so the answer recreates the question.
+        </li>
+      </ul>
+      <p>
+        Any code that re-renders in response to a ref attach has to be idempotent with respect to
+        re-attaches. The second-order lesson is on the Suspense side: a subtree whose first paint
+        depends on a suspense-style hook has only the lowest-priority lane to get itself committed —
+        fine in a quiet app, fatal next to a permanent update stream.
+      </p>
+
+      <footer>
+        Source, full write-up and the original app's measurements:
+        <a href="https://github.com/VdustR/demo-render-loop-starvation"
+          >github.com/VdustR/demo-render-loop-starvation</a
+        >
+      </footer>
+    </main>
+  </body>
+</html>
