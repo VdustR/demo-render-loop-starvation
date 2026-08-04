@@ -11,5 +11,6 @@
     "dev:svelte5": "pnpm --filter demo-svelte5 dev",
     "build": "pnpm -r build",
     "build:site": "pnpm -r build:site"
-  }
+  },
+  "packageManager": "pnpm@11.18.0"
 }
