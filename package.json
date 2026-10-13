@@ -5,6 +5,7 @@
   "version": "0.0.0",
   "description": "A requestAnimationFrame-paced render loop that no framework guard catches: wasted work on every renderer, and a permanent deadlock on concurrent React.",
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "dev:react19": "pnpm --filter demo-react19 dev",
     "dev:react18": "pnpm --filter demo-react18 dev",
     "dev:vue3": "pnpm --filter demo-vue3 dev",

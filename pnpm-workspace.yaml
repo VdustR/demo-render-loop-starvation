@@ -2,7 +2,7 @@ packages:
   - apps/*
 
 overrides:
-  devalue: 5.9.2
+  devalue: 5.9.3
 
 allowBuilds:
   esbuild: true
